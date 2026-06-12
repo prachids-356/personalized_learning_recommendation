@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+.env
+
+# Node/Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Data Files & Models
+backend/data/files/skill_builder_data.csv
+backend/data/files/skill_builder_data.csv.tmp
+backend/data/files/retention_logs.csv
+backend/data/files/student_logs.csv
+backend/data/files/students.csv
+# We keep assistments_model.pkl so it is deployed with the server
+
+# System logs
+.system_generated/
+*.log
