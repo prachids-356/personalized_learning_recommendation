@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 export default function StudentProfile({
   studentDetails,
   studentsList,
@@ -11,7 +13,7 @@ export default function StudentProfile({
   const [modelInfo, setModelInfo] = useState(null);
 
   useEffect(() => {
-    fetch("http://localhost:8000/api/performance/model-info")
+    fetch(`${API_BASE}/api/performance/model-info`)
       .then(res => res.json())
       .then(data => setModelInfo(data))
       .catch(err => console.error("Error loading model info:", err));

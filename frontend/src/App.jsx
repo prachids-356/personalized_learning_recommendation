@@ -16,6 +16,8 @@ const PREREQUISITES = {
   "Dynamic Programming": ["Trees", "Arrays"]
 };
 
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 export default function App() {
   const [students, setStudents] = useState([]);
   const [selectedStudentId, setSelectedStudentId] = useState(1);
@@ -30,7 +32,7 @@ export default function App() {
   const fetchStudents = async () => {
     try {
       setBackendOffline(false);
-      const res = await fetch("http://localhost:8000/api/students");
+      const res = await fetch(`${API_BASE}/api/students`);
       if (!res.ok) throw new Error("Failed to load student profiles");
       const data = await res.json();
       setStudents(data);
@@ -49,9 +51,9 @@ export default function App() {
     setLoading(true);
     try {
       const [studentRes, recsRes, retentionRes] = await Promise.all([
-        fetch(`http://localhost:8000/api/student/${studentId}`),
-        fetch(`http://localhost:8000/api/recommendations/${studentId}`),
-        fetch(`http://localhost:8000/api/retention/${studentId}`)
+        fetch(`${API_BASE}/api/student/${studentId}`),
+        fetch(`${API_BASE}/api/recommendations/${studentId}`),
+        fetch(`${API_BASE}/api/retention/${studentId}`)
       ]);
 
       if (!studentRes.ok || !recsRes.ok || !retentionRes.ok) {

@@ -1,0 +1,23 @@
+services:
+  # FastAPI backend service
+  - type: web
+    name: learning-engine-backend
+    env: python
+    buildCommand: pip install -r backend/requirements.txt && python backend/data/train_assistments.py
+    startCommand: uvicorn backend.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.0
+
+  # Vite frontend static site
+  - type: web
+    name: learning-engine-frontend
+    env: static
+    buildCommand: npm install --prefix frontend && npm run build --prefix frontend
+    publishPath: frontend/dist
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          name: learning-engine-backend
+          type: web
+          property: host

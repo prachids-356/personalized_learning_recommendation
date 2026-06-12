@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from "react";
 
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 export default function SimulationPanel({ selectedTopic, studentId, topics, onPracticeCompleted }) {
   const [topic, setTopic] = useState("");
   const [correct, setCorrect] = useState(true);
@@ -28,7 +30,7 @@ export default function SimulationPanel({ selectedTopic, studentId, topics, onPr
     const fetchPrediction = async () => {
       setPredicting(true);
       try {
-        const res = await fetch("http://localhost:8000/api/performance/predict", {
+        const res = await fetch(`${API_BASE}/api/performance/predict`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -68,7 +70,7 @@ export default function SimulationPanel({ selectedTopic, studentId, topics, onPr
     };
 
     try {
-      const response = await fetch("http://localhost:8000/api/practice", {
+      const response = await fetch(`${API_BASE}/api/practice`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload)
