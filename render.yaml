@@ -20,11 +20,16 @@ services:
         sync: false
       - key: COOKIE_SECURE
         value: "true"
+      - key: DATABASE_PATH
+        value: /var/data/learning_engine.db
       - key: DATABASE_URL
         sync: false
     healthCheckPath: /health
-    # Free-tier Render does not support a persistent SQLite disk. The app falls back to
-    # its default local database file under backend/data/files so it can run without payment.
+    # SQLite needs a persistent disk in production. Attach a Render disk at /var/data.
+    disk:
+      name: learning-engine-data
+      mountPath: /var/data
+      sizeGB: 1
 
   # Vite frontend static site
   - type: web
