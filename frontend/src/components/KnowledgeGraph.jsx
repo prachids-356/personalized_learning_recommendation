@@ -36,11 +36,6 @@ export default function KnowledgeGraph({ topics, selectedTopic, onSelectTopic, r
     return map;
   }, [topics]);
 
-  // Check if topic is recommended
-  const isRecommended = (topicName) => {
-    return recommendations && recommendations.some(r => r.topic === topicName);
-  };
-
   const getRecommendationRank = (topicName) => {
     if (!recommendations) return -1;
     return recommendations.findIndex(r => r.topic === topicName) + 1;

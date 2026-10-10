@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -12,11 +12,12 @@ export default function SimulationPanel({ selectedTopic, studentId, topics, onPr
   const [error, setError] = useState(null);
   
   const [prediction, setPrediction] = useState(null);
-  const [predicting, setPredicting] = useState(false);
 
   // Sync with selectedTopic from graph
   useEffect(() => {
     if (selectedTopic) {
+      // Keep the form selection aligned with graph navigation.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTopic(selectedTopic);
     } else if (topics && topics.length > 0) {
       setTopic(topics[0].topic);
@@ -28,7 +29,6 @@ export default function SimulationPanel({ selectedTopic, studentId, topics, onPr
     if (!topic || !studentId) return;
     
     const fetchPrediction = async () => {
-      setPredicting(true);
       try {
         const res = await fetch(`${API_BASE}/api/performance/predict`, {
           method: "POST",
@@ -46,8 +46,6 @@ export default function SimulationPanel({ selectedTopic, studentId, topics, onPr
         }
       } catch (err) {
         console.error("Error predicting performance:", err);
-      } finally {
-        setPredicting(false);
       }
     };
 

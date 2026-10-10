@@ -1,25 +1,50 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.middleware.sessions import SessionMiddleware
+from starlette.responses import RedirectResponse
+import httpx
+import logging
 import pandas as pd
 import numpy as np
 import os
+from urllib.parse import urlencode
+from urllib.parse import urlparse
 from datetime import datetime, timedelta
 
 from backend.data.generator import save_data, PREREQUISITES, TOPIC_DIFFICULTY
 from backend.data.preprocessor import compute_mastery_matrix, prepare_retention_features
 from backend.models.recommender import HybridRecommender
 from backend.models.retention import SpacedRepetitionModel
+from backend.database import initialize_from_csv, load_dataframes, save_dataframes
+
+
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+logger = logging.getLogger("learning_engine")
 
 app = FastAPI(title="Personalized Learning Recommendation & Spaced Retention Engine")
 
-# Enable CORS for the frontend
+frontend_origins = [
+    origin.strip().rstrip("/")
+    for origin in os.getenv(
+        "FRONTEND_ORIGIN",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=frontend_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+)
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=os.getenv("SESSION_SECRET", "local-development-session-secret"),
+    same_site="lax",
+    https_only=os.getenv("COOKIE_SECURE", "false").lower() == "true",
 )
 
 DATA_DIR = os.path.join(os.path.dirname(__file__), "data", "files")
@@ -46,47 +71,196 @@ def load_and_train():
         print("Data files not found. Generating synthetic dataset...")
         save_data(DATA_DIR)
         
-    students_df = pd.read_csv(STUDENTS_CSV)
-    logs_df = pd.read_csv(LOGS_CSV)
-    retention_df = pd.read_csv(RETENTION_CSV)
+    initialize_from_csv(STUDENTS_CSV, LOGS_CSV, RETENTION_CSV)
+    students_df, logs_df, retention_df = load_dataframes()
     
     # Convert timestamps to datetime objects
-    logs_df["timestamp"] = pd.to_datetime(logs_df["timestamp"])
-    retention_df["timestamp"] = pd.to_datetime(retention_df["timestamp"])
+    logs_df["timestamp"] = pd.to_datetime(logs_df["timestamp"], format="mixed")
+    retention_df["timestamp"] = pd.to_datetime(retention_df["timestamp"], format="mixed")
     
     # 2. Train Recommender Model
-    print("Training Hybrid Recommender (SVD Collaborative Filtering)...")
+    logger.info("Training hybrid recommender")
     mastery_matrix = compute_mastery_matrix(logs_df)
     recommender.fit(mastery_matrix)
     
     # 3. Train Spaced Repetition Model
-    print("Training Spaced Repetition (Random Forest Retention) Model...")
+    logger.info("Training spaced repetition model")
     X, y = prepare_retention_features(retention_df)
     retention_model.fit(X, y)
     
     # 4. Load ASSISTments Performance Predictor Model if exists
     if os.path.exists(ASSISTMENTS_MODEL_PATH):
-        print("Loading ASSISTments performance predictor model...")
+        logger.info("Loading ASSISTments performance predictor model")
         try:
             assistments_model = joblib.load(ASSISTMENTS_MODEL_PATH)
-            print("ASSISTments performance predictor model loaded successfully!")
+            logger.info("ASSISTments performance predictor model loaded")
         except Exception as e:
-            print(f"Error loading ASSISTments model: {e}")
+            logger.exception("Error loading ASSISTments model")
             
-    print("Models successfully trained and loaded!")
+    logger.info("Models successfully trained and loaded")
 
 @app.on_event("startup")
 def startup_event():
     load_and_train()
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok", "models_loaded": students_df is not None}
+
+
+@app.get("/api/auth/me")
+def get_current_user(request: Request):
+    return {"authenticated": "github_user" in request.session, "user": request.session.get("github_user")}
+
+
+@app.get("/api/auth/github/login")
+def github_login(request: Request):
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(status_code=503, detail="GitHub OAuth is not configured")
+
+    callback_url = f"{str(request.base_url).rstrip('/')}/api/auth/github/callback"
+    request.session["github_oauth_state"] = os.urandom(24).hex()
+    params = {
+        "client_id": client_id,
+        "redirect_uri": os.getenv("GITHUB_REDIRECT_URI", callback_url),
+        "scope": "read:user user:email",
+        "state": request.session["github_oauth_state"],
+    }
+    query = urlencode(params)
+    return RedirectResponse(f"https://github.com/login/oauth/authorize?{query}")
+
+
+@app.get("/api/auth/github/status")
+def github_auth_status():
+    return {"oauth_configured": bool(os.getenv("GITHUB_CLIENT_ID") and os.getenv("GITHUB_CLIENT_SECRET"))}
+
+
+@app.get("/api/auth/github/callback")
+async def github_callback(request: Request, code: str = "", state: str = ""):
+    if not code or state != request.session.pop("github_oauth_state", None):
+        raise HTTPException(status_code=400, detail="Invalid GitHub OAuth callback")
+
+    client_id = os.getenv("GITHUB_CLIENT_ID")
+    client_secret = os.getenv("GITHUB_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=503, detail="GitHub OAuth is not configured")
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        token_response = await client.post(
+            "https://github.com/login/oauth/access_token",
+            json={"client_id": client_id, "client_secret": client_secret, "code": code},
+            headers={"Accept": "application/json"},
+        )
+        token_response.raise_for_status()
+        access_token = token_response.json().get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="GitHub did not return an access token")
+
+        user_response = await client.get(
+            "https://api.github.com/user",
+            headers={"Authorization": f"Bearer {access_token}", "Accept": "application/vnd.github+json"},
+        )
+        user_response.raise_for_status()
+        user = user_response.json()
+
+    request.session["github_user"] = {
+        "id": user["id"],
+        "login": user["login"],
+        "name": user.get("name"),
+        "avatar_url": user.get("avatar_url"),
+        "html_url": user.get("html_url"),
+    }
+    return RedirectResponse(frontend_origins[0])
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"authenticated": False}
+
+
+class LearningProfile(BaseModel):
+    goal: str = Field(default="", max_length=160)
+    experience: str = Field(default="beginner", max_length=40)
+    github: str = Field(default="", max_length=300)
+    leetcode: str = Field(default="", max_length=300)
+    hackerrank: str = Field(default="", max_length=300)
+    geeksforgeeks: str = Field(default="", max_length=300)
+
+
+async def analyze_github_profile(profile_url):
+    if not profile_url:
+        return None
+
+    parsed = urlparse(profile_url if "://" in profile_url else f"https://{profile_url}")
+    if parsed.netloc.lower() not in {"github.com", "www.github.com"}:
+        return {"status": "invalid", "message": "Use a github.com profile URL."}
+
+    username = parsed.path.strip("/").split("/")[0]
+    if not username:
+        return {"status": "invalid", "message": "GitHub username is missing."}
+
+    headers = {"Accept": "application/vnd.github+json", "User-Agent": "EduPrime-AI"}
+    async with httpx.AsyncClient(timeout=10) as client:
+        user_response = await client.get(f"https://api.github.com/users/{username}", headers=headers)
+        if user_response.status_code == 404:
+            return {"status": "not_found", "message": "GitHub profile was not found."}
+        user_response.raise_for_status()
+        user = user_response.json()
+
+        repos_response = await client.get(
+            f"https://api.github.com/users/{username}/repos?per_page=100&sort=updated",
+            headers=headers,
+        )
+        repos_response.raise_for_status()
+        repositories = repos_response.json()
+
+    language_counts = {}
+    for repository in repositories:
+        language = repository.get("language")
+        if language:
+            language_counts[language] = language_counts.get(language, 0) + 1
+
+    return {
+        "status": "analyzed",
+        "username": user.get("login"),
+        "public_repositories": user.get("public_repos", 0),
+        "followers": user.get("followers", 0),
+        "languages": sorted(language_counts, key=language_counts.get, reverse=True)[:6],
+        "recent_repository_count": len(repositories),
+    }
+
+
+@app.get("/api/profile")
+def get_learning_profile(request: Request):
+    return request.session.get("learning_profile", None)
+
+
+@app.post("/api/profile")
+async def save_learning_profile(profile: LearningProfile, request: Request):
+    saved_profile = profile.model_dump()
+    saved_profile["sources"] = {
+        "github": bool(profile.github),
+        "leetcode": bool(profile.leetcode),
+        "hackerrank": bool(profile.hackerrank),
+        "geeksforgeeks": bool(profile.geeksforgeeks),
+    }
+    try:
+        saved_profile["github_analysis"] = await analyze_github_profile(profile.github)
+    except httpx.HTTPError:
+        saved_profile["github_analysis"] = {"status": "unavailable", "message": "GitHub analysis is temporarily unavailable."}
+    request.session["learning_profile"] = saved_profile
+    return saved_profile
+
 class PracticeSubmission(BaseModel):
     student_id: int
     topic: str
-    correct: int  # 0 or 1
-    attempts_count: int
-    time_taken: int
-    hints_used: int
-    days_elapsed: float = 0.0  # Simulate time passing since last activity
+    correct: int = Field(ge=0, le=1)
+    attempts_count: int = Field(ge=1)
+    time_taken: int = Field(ge=0)
+    hints_used: int = Field(ge=0)
+    days_elapsed: float = Field(default=0.0, ge=0.0)
 
 @app.get("/api/students")
 def get_students():
@@ -163,7 +337,7 @@ def get_student_details(student_id: int):
     }
 
 @app.get("/api/recommendations/{student_id}")
-def get_recommendations(student_id: int):
+def get_recommendations(student_id: int, request: Request):
     global logs_df
     if logs_df is None:
         raise HTTPException(status_code=500, detail="Data not loaded")
@@ -178,6 +352,27 @@ def get_recommendations(student_id: int):
         mastery_dict = {topic: 0.0 for topic in PREREQUISITES.keys()}
         
     recommendations = recommender.recommend(student_id, mastery_dict, top_k=3)
+    profile = request.session.get("learning_profile", {})
+    profile_text = " ".join([
+        profile.get("goal", ""),
+        profile.get("experience", ""),
+        " ".join(key for key in ("github", "leetcode", "hackerrank", "geeksforgeeks") if profile.get(key)),
+        " ".join(profile.get("github_analysis", {}).get("languages", [])),
+    ]).lower()
+    topic_keywords = {
+        "Arrays": ("array", "data structure", "leetcode", "hackerrank", "geeksforgeeks"),
+        "Strings": ("string", "text", "frontend"),
+        "Hashing": ("hash", "backend", "api", "python", "javascript", "typescript"),
+        "Trees": ("tree", "backend", "system design"),
+        "Graphs": ("graph", "network", "backend", "java", "go", "c++"),
+        "Dynamic Programming": ("dynamic", "optimization", "interview"),
+    }
+    for recommendation in recommendations:
+        matches = topic_keywords.get(recommendation["topic"], ())
+        boost = 1.08 if any(keyword in profile_text for keyword in matches) else 1.0
+        recommendation["personalization_boost"] = boost
+        recommendation["recommendation_score"] *= boost
+    recommendations.sort(key=lambda item: item["recommendation_score"], reverse=True)
     return recommendations
 
 @app.get("/api/retention/{student_id}")
@@ -255,6 +450,11 @@ def submit_practice(submission: PracticeSubmission):
         
     student_id = submission.student_id
     topic = submission.topic
+
+    if students_df[students_df["student_id"] == student_id].empty:
+        raise HTTPException(status_code=404, detail="Student not found")
+    if topic not in PREREQUISITES:
+        raise HTTPException(status_code=400, detail="Unknown topic")
     
     # 1. Update previous timestamps for student's practice to simulate elapsed days
     if submission.days_elapsed > 0:
@@ -293,7 +493,6 @@ def submit_practice(submission: PracticeSubmission):
             "timestamp": now
         }])
         retention_df = pd.concat([retention_df, new_retention_row], ignore_index=True)
-        retention_df.to_csv(RETENTION_CSV, index=False)
         
     # 3. Create general log row
     new_log_row = pd.DataFrame([{
@@ -307,10 +506,10 @@ def submit_practice(submission: PracticeSubmission):
         "timestamp": now
     }])
     logs_df = pd.concat([logs_df, new_log_row], ignore_index=True)
-    logs_df.to_csv(LOGS_CSV, index=False)
+    save_dataframes(students_df, logs_df, retention_df)
     
     # 4. Retrain models on the new data incrementally
-    print(f"Incremental retraining triggered by practice on {topic} for student {student_id}...")
+    logger.info("Retraining after practice: student=%s topic=%s", student_id, topic)
     mastery_matrix = compute_mastery_matrix(logs_df)
     recommender.fit(mastery_matrix)
     
@@ -341,14 +540,18 @@ def get_model_info():
 class PerformancePredictionRequest(BaseModel):
     student_id: int
     topic: str
-    hints_used: int
-    attempts_count: int
+    hints_used: int = Field(ge=0)
+    attempts_count: int = Field(ge=1)
 
 @app.post("/api/performance/predict")
 def predict_performance(req: PerformancePredictionRequest):
     global logs_df, assistments_model
     if logs_df is None:
         raise HTTPException(status_code=500, detail="Data not loaded")
+    if students_df[students_df["student_id"] == req.student_id].empty:
+        raise HTTPException(status_code=404, detail="Student not found")
+    if req.topic not in PREREQUISITES:
+        raise HTTPException(status_code=400, detail="Unknown topic")
         
     student_logs = logs_df[logs_df["user_id"] == req.student_id]
     
@@ -382,7 +585,7 @@ def predict_performance(req: PerformancePredictionRequest):
             prob = float(assistments_model.predict_proba(features)[0, 1])
             prediction = int(assistments_model.predict(features)[0])
         except Exception as e:
-            print(f"Error predicting with ASSISTments model: {e}")
+            logger.exception("Error predicting with ASSISTments model")
             prob = 0.95 if (req.hints_used == 0 and req.attempts_count == 1) else 0.05
             prediction = 1 if prob >= 0.5 else 0
     else:

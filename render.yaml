@@ -8,6 +8,28 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.10.0
+      - key: FRONTEND_ORIGIN
+        sync: false
+      - key: SESSION_SECRET
+        sync: false
+      - key: GITHUB_CLIENT_ID
+        sync: false
+      - key: GITHUB_CLIENT_SECRET
+        sync: false
+      - key: GITHUB_REDIRECT_URI
+        sync: false
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: DATABASE_PATH
+        value: /var/data/learning_engine.db
+      - key: DATABASE_URL
+        sync: false
+    healthCheckPath: /health
+    # SQLite needs a persistent disk in production. Attach a Render disk at /var/data.
+    disk:
+      name: learning-engine-data
+      mountPath: /var/data
+      sizeGB: 1
 
   # Vite frontend static site
   - type: web
@@ -20,4 +42,4 @@ services:
         fromService:
           name: learning-engine-backend
           type: web
-          property: host
+          property: url

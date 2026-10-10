@@ -1,12 +1,9 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function StudentProfile({
   studentDetails,
-  studentsList,
-  selectedStudentId,
-  onStudentChange,
   retentionInfo,
   onSelectTopic
 }) {
@@ -34,35 +31,19 @@ export default function StudentProfile({
         <div>
           <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">Active Profile</span>
           <div className="flex items-center gap-2 mt-0.5">
-            <h2 className="text-xl font-bold text-white">Student #{selectedStudentId}</h2>
+            <h2 className="text-xl font-bold text-white">Your Learning Profile</h2>
           </div>
-        </div>
-        
-        {/* Student Selector */}
-        <div>
-          <label className="block text-[10px] text-zinc-500 font-medium mb-1">Switch Student Profile</label>
-          <select
-            value={selectedStudentId}
-            onChange={(e) => onStudentChange(parseInt(e.target.value))}
-            className="bg-zinc-950 border border-zinc-800 rounded-lg py-1.5 px-3 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
-          >
-            {studentsList && studentsList.map(s => (
-              <option key={s.student_id} value={s.student_id}>
-                Student #{s.student_id} (Ability: {s.ability.toFixed(2)})
-              </option>
-            ))}
-          </select>
         </div>
       </div>
 
       {/* Model Latent Variables Card */}
       <div className="latent-stats">
         <div>
-          <div className="text-zinc-500 font-medium">True Learning Ability</div>
+          <div className="text-zinc-500 font-medium">Baseline Learning Signal</div>
           <div className="text-lg font-bold text-emerald-400 mt-0.5">
             {ability.toFixed(2)}x
           </div>
-          <p className="text-[9px] text-zinc-500 mt-0.5">Influences base mastery acquisition rate.</p>
+          <p className="text-[9px] text-zinc-500 mt-0.5">Updated from your profile and practice activity.</p>
         </div>
         <div>
           <div className="text-zinc-500 font-medium">Forgetting Decay Rate</div>

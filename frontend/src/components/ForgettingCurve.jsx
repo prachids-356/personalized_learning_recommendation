@@ -1,5 +1,3 @@
-import React from "react";
-
 export default function ForgettingCurve({ curves, selectedTopic, retentionStatus }) {
   if (!curves || Object.keys(curves).length === 0) {
     return (

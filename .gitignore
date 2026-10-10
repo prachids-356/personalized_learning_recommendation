@@ -20,6 +20,7 @@ backend/data/files/skill_builder_data.csv.tmp
 backend/data/files/retention_logs.csv
 backend/data/files/student_logs.csv
 backend/data/files/students.csv
+backend/data/files/*.db
 # We keep assistments_model.pkl so it is deployed with the server
 
 # System logs
