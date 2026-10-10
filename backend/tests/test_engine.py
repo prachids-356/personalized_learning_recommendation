@@ -108,5 +108,15 @@ class TestLearningEngine(unittest.TestCase):
         print(f"Predicted half life: {half_life} days")
         self.assertGreater(half_life, 0)
 
+    def test_render_free_tier_uses_local_sqlite_path(self):
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        render_path = os.path.join(repo_root, "render.yaml")
+
+        with open(render_path, "r", encoding="utf-8") as fh:
+            render_config = fh.read()
+
+        self.assertNotIn("disk:", render_config)
+        self.assertNotIn("/var/data/learning_engine.db", render_config)
+
 if __name__ == "__main__":
     unittest.main()
