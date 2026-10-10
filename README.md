@@ -141,7 +141,7 @@ The API creates `backend/data/files/learning_engine.db` on first startup and imp
 2. Click **Add New** -> **Project** and import your repository.
 3. Configure the settings:
    - **Root Directory**: Select `frontend`.
-   - **Environment Variables**: Add one variable:
+    - **Environment Variables**: Add one variable:
      - **Name**: `VITE_API_URL`
      - **Value**: Your Render backend URL (e.g., `https://personalized-learning-backend.onrender.com`)
 4. Click **Deploy**.
