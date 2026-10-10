@@ -36,7 +36,7 @@ services:
     name: learning-engine-frontend
     env: static
     buildCommand: npm install --prefix frontend && npm run build --prefix frontend
-    publishPath: frontend/dist
+    staticPublishPath: frontend/dist
     envVars:
       - key: VITE_API_URL
         fromService:
